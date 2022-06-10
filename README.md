@@ -1,4 +1,4 @@
-# Hierarchical Object-to-Zone Graph for Object Navigation
+# Layout-based Causal Inference for Object Navigation
 Sixian Zhang, Xinhang Song, Yubing Bai, Weijie Li, Yakui Chu, Shuqiang Jiang (Accepted by ICCV 2021)
 
 [ICCV 2021 Paper](https://openaccess.thecvf.com/content/ICCV2021/html/Zhang_Hierarchical_Object-to-Zone_Graph_for_Object_Navigation_ICCV_2021_paper.html) | 
@@ -34,15 +34,3 @@ The `data` folder should look like this
 `python full_eval.py --title HOZ --model HOZ --results-json HOZ.json --gpu-ids 0`
 ### Evaluate our HOZ-TPN model 
 `python full_eval.py --title TPNHOZ --model MetaMemoryHOZ --results-json HOZTPN.json --gpu-ids 0`
-## Citing
-If you find this project useful in your research, please consider citing:
-```
-@InProceedings{Zhang_2021_ICCV,
-    author    = {Zhang, Sixian and Song, Xinhang and Bai, Yubing and Li, Weijie and Chu, Yakui and Jiang, Shuqiang},
-    title     = {Hierarchical Object-to-Zone Graph for Object Navigation},
-    booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
-    month     = {October},
-    year      = {2021},
-    pages     = {15130-15140}
-}
-```
