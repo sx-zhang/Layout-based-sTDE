@@ -35,13 +35,7 @@ class NavigationAgent(ThorAgent):
         self.glove = {}
         self.TDE = args.TDE
         self.TDE_self = args.TDE_self
-        if self.TDE:
-            self.counterfact_model = BiasModel(args)
-            self.counterfact_model.load_state_dict(torch.load('./trained_models/biasmodel_19429049_1500000_2022_04_18_13_27_13.dat'))
-            with torch.cuda.device(self.gpu_id):
-                self.counterfact_model.cuda()
-            self.counterfact_hidden = None
-            self.counterfact_last_action_probs = None
+    
         if 'SP' in self.model_name:
             with h5py.File('/home/dhm/Code/vn/glove_map300d.hdf5', 'r') as rf:
                 for i in rf:
@@ -114,31 +108,8 @@ class NavigationAgent(ThorAgent):
             model_input.states_memory = toFloatTensor(model_input.states_memory, self.gpu_id)
             model_input.action_memory = toFloatTensor(model_input.action_memory, self.gpu_id)
             model_input.obs_reps = toFloatTensor(model_input.obs_reps, self.gpu_id)
-        if self.TDE and 'NewModel' in self.model_name:
-            output = self.model.forward(model_input, model_options)
 
-            model_input.counterfact_action_probs = self.counterfact_last_action_probs
-            model_input.counterfact_hidden = self.counterfact_hidden
-
-            # self.time_start.record()
-            # st = time.time()
-            output_counterfact = self.counterfact_model.forward(model_input, model_options, counterfact=True)
-            # print(time.time()-st)
-            # self.time_end.record()
-            # torch.cuda.synchronize()
-            # print(self.time_start.elapsed_time(self.time_end))
-            self.counterfact_hidden = output_counterfact.hidden
-            self.counterfact_action_probs = F.softmax(output_counterfact.logit, dim=1)
-            # scale = F.tanh(F.relu(self.model.object_distribution.kl[-1]-self.model.TDE_threshold.item()))
-            scale = F.tanh(self.model.object_distribution.kl[-1] - self.model.TDE_threshold.item())
-            scale_min = self.model.scale_min.to(scale.device)
-            scale_max = self.model.scale_max.to(scale.device)
-            scale = torch.min(scale_max, scale)
-            scale = torch.max(scale_min, scale)
-            # print(scale)
-            output.logit = torch.mul(output.logit, 1.0+scale) - torch.mul(output_counterfact.logit, scale)
-            # output.logit = output.logit + output_counterfact.logit
-        elif self.TDE_self and 'NewModel' in self.model_name:
+        if self.TDE_self and 'NewModel' in self.model_name:
             output = self.model.forward(model_input, model_options)
             output_counterfact = self.model.forward(model_input, model_options, counterfact=True)
 
@@ -150,19 +121,6 @@ class NavigationAgent(ThorAgent):
             output.logit = torch.mul(output.logit, 1.0+scale) - torch.mul(output_counterfact.logit, scale)
         else:
             output = self.model.forward(model_input, model_options)
-        # if self.TDE_self and 'NewModel' in self.model_name:
-        #     output = self.model.forward(model_input, model_options)
-        #     output_counterfact = self.model.forward(model_input, model_options, counterfact=True)
-        #
-        #     scale = F.tanh(self.model.object_distribution.kl[-1] - self.model.TDE_threshold.item())
-        #     scale_min = self.model.scale_min.to(scale.device)
-        #     scale_max = self.model.scale_max.to(scale.device)
-        #     scale = torch.min(scale_max, scale)
-        #     scale = torch.max(scale_min, scale)
-        #     output.logit = torch.mul(output.logit, 1.0+scale) - torch.mul(output_counterfact.logit, scale)
-        # else:
-        #     output = self.model.forward(model_input, model_options)
-        # output = self.model.forward(model_input, model_options)
 
         return model_input, output
 
@@ -181,18 +139,7 @@ class NavigationAgent(ThorAgent):
         self.last_action_probs = gpuify(
             torch.zeros((1, self.action_space)), self.gpu_id
         )
-        if self.TDE:
-            with torch.cuda.device(self.gpu_id):
-                self.counterfact_hidden = (
-                    torch.zeros(2, 1, self.hidden_state_sz).cuda(),
-                    torch.zeros(2, 1, self.hidden_state_sz).cuda(),
-                )
 
-            self.counterfact_last_action_probs = gpuify(
-            torch.zeros((1, self.action_space)), self.gpu_id
-            )
-            if hasattr(self.counterfact_model, 'object_distribution'):
-                self.counterfact_model .object_distribution.reset_memory()
         if hasattr(self.model, 'reset'):
             self.model.reset()
         if hasattr(self.model, 'object_distribution'):
