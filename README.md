@@ -15,7 +15,6 @@ python main.py \
       --workers 12 \
       --gpu-ids 0
 ```
-`python main.py --title HOZ --model HOZ --workers 12 -–gpu-ids 0`
 ### Evaluate our model without sTDE (only Layout-based model) 
 ```shell
 python full_eval.py \
