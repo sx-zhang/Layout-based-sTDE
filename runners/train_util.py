@@ -55,7 +55,6 @@ def run_episode(player, args, total_reward, model_options, training, shared_mode
     update_test = True in update_test_type.values()
 
     for _ in range(num_steps):
-        # player.action(model_options, training, update_test, TDE=args.TDE)
         player.action(model_options, training, update_test)
 
         if update_test_type['meta_learning']:

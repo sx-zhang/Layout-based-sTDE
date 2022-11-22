@@ -1,7 +1,9 @@
+from asyncio import constants
 import torch
 import scipy.io as scio
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.kl import kl_divergence
+import torch.nn.functional as F
 import copy
 import numpy as np
 import torch.nn as nn
@@ -9,23 +11,26 @@ import torch.nn as nn
 
 class Object_Distribution(torch.nn.Module):
 
-    def __init__(self, dataset='AI2THOR'):
+    def __init__(self, dataset='AI2THOR', stack_length=20, feature_memory=False, mode='train'):
         '''
         :param prior_alpha: class_num*(class_num-1)
         '''
         super(Object_Distribution, self).__init__()
         self.dataset = dataset
+        self.stack_length = stack_length
         self.init_prior_alpha = self.upload_prior_alpha()
         self.class_num = self.init_prior_alpha.shape[1]
         self.prior_alpha = None
         self.posterior_alpha = None
-        self.feature_memory = []
-        self.object_memory = []
+        self.feature_stack = None
+        self.object_stack = None
         self.prob_matrix = None
-        self.kl = []
+        self.kl = 0.0
+        self.mode = mode  # train or test
         self.ii_pro = torch.ones(1)
         # self.base_scale = nn.Parameter(torch.tensor(10.0), requires_grad=True)
-        self.similarity_scale = nn.Parameter(torch.tensor(6.0), requires_grad=True)
+        self.similarity_scale = nn.Parameter(torch.tensor(0.0001), requires_grad=True)
+        self.feature_memory = feature_memory
         self.update_scale = nn.Sequential(
             nn.Linear(22, 22),
             nn.ReLU(),
@@ -41,7 +46,10 @@ class Object_Distribution(torch.nn.Module):
             scenes = ['scenes']
         data = scio.loadmat('prior_distribution/dis_param_{}_v2.mat'.format(self.dataset))
         for s in scenes:
-            init_prior_alpha.append(data[s])
+            raw_data = data[s]
+            up_tri = np.pad(np.triu(raw_data),((0,0),(1,0)),'constant',constant_values=0.0)
+            low_tri = np.pad(np.tril(raw_data,-1),((0,0),(0,1)),'constant',constant_values=0.0)
+            init_prior_alpha.append(up_tri+low_tri)
         return torch.tensor(init_prior_alpha, dtype=torch.float32)
 
     def get_scene_id(self, current_scene):
@@ -57,7 +65,7 @@ class Object_Distribution(torch.nn.Module):
             idx = 3
         return idx
 
-    def observation_memory_update(self, observation_t, current_scene, target_object):
+    def observation_memory_update(self, observation_t, current_scene, target_object, update_co=5.0):
         '''
         observation_t['info']:bounding box + probability (22, 5)
         observation_t['indicator']:target object (22, 1)
@@ -69,97 +77,88 @@ class Object_Distribution(torch.nn.Module):
         elif self.dataset == 'MP3D' or 'RoboTHOR':
             scene_id = 0
 
-        if len(self.object_memory) == 0:  # init the pram
+        if (self.feature_stack is None) and (self.object_stack is None):  # init the memory and parm
             device = observation_t['indicator'].device
+            if self.feature_memory:
+                self.feature_stack = torch.zeros(self.stack_length, 22, 512).to(device)
+            else:
+                self.object_stack = torch.zeros(self.stack_length, 22).to(device)
             self.prior_alpha = copy.deepcopy(self.init_prior_alpha[scene_id, :, :]).to(device)
             self.posterior_alpha = copy.deepcopy(self.prior_alpha)
             self.pro_matrix_update()
-            self.kl.append(torch.tensor([0.0]).to(device))
+            self.kl = torch.tensor([0.0]).to(device)
 
         object_t = torch.sign(observation_t['info'][:, -1])
-        similarity_flag = False
-        if object_t.sum(-1) > 1:  # the objects in view should greater than 1
-            if len(self.object_memory) == 0:
-                similarity_flag = False
-            else:
-                for inx, val in enumerate(self.object_memory):
-                    feature_similarity = (val-object_t).pow(2).sum(0)
-                    if feature_similarity == 0 \
-                            and (self.feature_memory[inx]-observation_t['appear']).pow(2).sum(0).sum(0) < self.similarity_scale:
-                        similarity_flag = True
-                        break
-            if not similarity_flag:
-                self.prior_alpha.detach()
-                self.posterior_alpha.detach()
-                self.feature_memory.append(observation_t['appear'])
-                self.object_memory.append(object_t)
-                update_scale = self.update_scale(object_t+target_object.squeeze())
-                update_scale = update_scale.mul(10.0)
-                self.posterior_update(update_scale)
-                self.compute_kl_and_matrix()
-                self.pro_matrix_update()
-                self.prior_update()
-            else:
-                self.kl.append(self.kl[-1] * 0.8)
+        if self.feature_memory:
+            current_similarity = self.feature_stack - observation_t['appear'].view(1,22,512).repeat(self.stack_length,1,1)
+            current_similarity = torch.min(torch.square(current_similarity.view(self.stack_length, 11264)).mean(1))
         else:
-            self.kl.append(self.kl[-1] * 0.8)
-
+            current_similarity = self.object_stack - object_t.view(1,22).repeat(self.stack_length,1)
+            current_similarity = torch.min(torch.square(current_similarity).mean(1))
+        if current_similarity > self.similarity_scale and object_t.sum(-1) > 1:
+            # memory update
+            if self.feature_memory:
+                self.feature_stack = self.memory_update(observation_t['appear'], self.feature_stack.detach())
+            else:
+                self.object_stack = self.memory_update(object_t, self.object_stack.detach())
+            # self.object_stack = self.memory_update(object_t, self.object_stack)
+            # compute distribution
+            self.prior_alpha.detach()
+            self.posterior_alpha.detach()
+            update_scale = self.update_scale(object_t+target_object.squeeze())
+            # update_scale = update_scale.mul(10.0)
+            update_scale = update_co  # hoz 10.0, has great influence 5.0 has better performance
+            self.posterior_update(update_scale, object_t)
+            if self.mode == 'test':
+                self.compute_kl()
+            self.pro_matrix_update()
+            self.prior_update()
+        else:
+            self.kl = self.kl * 0.8
+            
     def reset_memory(self):
-        self.feature_memory.clear()
-        self.object_memory.clear()
-        self.kl.clear()
+        self.feature_stack = None
+        self.object_stack = None
 
-    def posterior_update(self, update_scale):
-        observed_objects = self.object_memory[-1]
-        posterior_alpha = None
-        for i in range(self.class_num):
-            if observed_objects[i] == 0:
-                update_alpha = self.prior_alpha[i, :].unsqueeze(0)
-            else:
-                update_alpha = self.prior_alpha[i, :] + self.del_tensor(torch.mul(observed_objects, update_scale), i)
-                update_alpha = update_alpha.unsqueeze(0)
-
-            posterior_alpha = self.accumulate_posterior_alpha(posterior_alpha, update_alpha)
-        self.posterior_alpha = posterior_alpha
-
-    def accumulate_posterior_alpha(self, posterior_alpha, update_alpha):
-        if posterior_alpha is None:
-            posterior_alpha = update_alpha
-        else:
-            posterior_alpha = torch.cat((posterior_alpha, update_alpha), dim=0)
-        return posterior_alpha
+    def posterior_update(self, update_scale, observed_objects):
+        # observed_objects = self.object_memory[-1]
+        # observed_objects = torch.tensor([0,1,0,0,1,1,0]).to(observed_objects.device)
+        num_cls = observed_objects.shape[0]
+        observed_mat = observed_objects.view(1, num_cls).repeat(num_cls,1)
+        observed_mat = observed_mat*(observed_objects.view(num_cls,1))-torch.diag(observed_objects)
+        self.posterior_alpha = self.prior_alpha + torch.mul(observed_objects, update_scale)
+        
 
     def prior_update(self):
         self.prior_alpha = copy.deepcopy(self.posterior_alpha.detach())
-
-    def del_tensor(self, arr, ind):
-        arr_1 = arr[0: ind]
-        arr_2 = arr[ind+1:]
-        return torch.cat((arr_1, arr_2), dim=0)
-
-    def expand_tensor(self, arr, ind):
-        arr_1 = arr[0:ind]
-        arr_2 = arr[ind:]
-        expand_tensor = torch.cat((arr_1, torch.tensor([1.0]).to(arr_1.device), arr_2), dim=0)
-        return expand_tensor.unsqueeze(0)
+    
+    def memory_update(self, arr, memory):
+        current = torch.unsqueeze(arr, dim=0)
+        return torch.cat((current, memory[1:]), dim=0)
 
     def pro_matrix_update(self):
-        post_distribution = Dirichlet(self.posterior_alpha)
-        post_pro_matrix = post_distribution.mean
-        pro_matrix = None
-        for i in range(self.class_num):
-            if pro_matrix is None:
-                pro_matrix = self.expand_tensor(post_pro_matrix[i], i)
-            else:
-                pro_matrix = torch.cat((pro_matrix, self.expand_tensor(post_pro_matrix[i], i)), dim=0)
-
+        # expation of Dirichlet distribution url: https://en.wikipedia.org/wiki/Dirichlet_distribution
+        pro_matrix = self.posterior_alpha/torch.sum(self.posterior_alpha,dim=(1,),keepdim=True)
+        pro_matrix = pro_matrix + torch.eye(pro_matrix.shape[0]).to(pro_matrix.device)
         self.prob_matrix = pro_matrix
 
-    def compute_kl_and_matrix(self):
-        pr_distribution = Dirichlet(self.prior_alpha)
-        post_distribution = Dirichlet(self.posterior_alpha)
+    def compute_kl(self):
+        # computing kl divergence is resource intensive
+        # kl is computed only on inference 
+        num_cls = self.prior_alpha.shape[0]
+        # each alpha should be >0
+        pr_distribution = Dirichlet(self.prior_alpha + torch.eye(num_cls).to(self.prior_alpha.device))
+        post_distribution = Dirichlet(self.posterior_alpha + torch.eye(num_cls).to(self.posterior_alpha.device))
         kl = kl_divergence(post_distribution, pr_distribution).sum()
-        self.kl.append(kl)
+        # kl = kl_divergence(post_distribution, pr_distribution).mean()
+        # delete the diagonal
+        # prior_alpha_d = torch.tril(self.prior_alpha, diagonal=-1)[:,0:-1]+torch.triu(self.prior_alpha, diagonal=1)[:,1:]
+        # posterior_alpha_d = torch.tril(self.posterior_alpha, diagonal=-1)[:,0:-1]+torch.triu(self.posterior_alpha, diagonal=1)[:,1:]
+        # pr_distribution_d = Dirichlet(prior_alpha_d)
+        # post_distribution_d = Dirichlet(posterior_alpha_d)
+        # kl_d = kl_divergence(post_distribution_d, pr_distribution_d).sum()
+        self.kl = torch.tanh(torch.abs(kl))
+        # self.kl = torch.tanh(kl)
 
 
 

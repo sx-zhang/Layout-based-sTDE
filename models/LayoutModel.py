@@ -105,11 +105,12 @@ class LayoutModel(torch.nn.Module):
         self.scene_embedding = nn.Conv2d(86,64,1,1)
         self.scene_classifier = nn.Linear(64*7*7,4)
 
-        self.object_distribution = Object_Distribution(dataset='AI2THOR')
-        self.TDE_threshold = torch.tensor(args.TDE_threshold)
-        self.scale_min = torch.tensor(args.scale_min)
+        self.object_distribution = Object_Distribution(dataset='AI2THOR', feature_memory=args.feature_memory, mode=args.model_phase)  # choose memory save feature or one-hot vector 
+        self.TDE_threshold = torch.tensor(args.TDE_threshold)  # p - TDE_threshold* P^
+        self.scale_min = torch.tensor(args.scale_min)  
         self.scale_max = torch.tensor(args.scale_max)
         self.mode = args.TDE_mode  # zero, one, random
+        self.phase = args.model_phase
 
 
         # last layer of resnet18.
@@ -148,35 +149,40 @@ class LayoutModel(torch.nn.Module):
 
         action_embedding = F.relu(self.embed_action(action_embedding_input))
         action_reshaped = action_embedding.view(1, 10, 1, 1).repeat(1, 1, 7, 7)
-
-        if counterfact:
-            # target_indicator_embedding = torch.ones(1, self.num_cate, 7, 7).to(target_exp.device)
-            if self.mode == 'zero':
-                image_embedding = torch.zeros(1, 64, 7, 7).to(target_exp.device)
-                target_indicator_embedding = torch.zeros(1, self.num_cate, 7, 7).to(target_exp.device)
-                # print(self.mode)
-            elif self.mode == 'one':
-                image_embedding = torch.ones(1, 64, 7, 7).to(target_exp.device)
-                target_indicator_embedding = torch.ones(1, self.num_cate, 7, 7).to(target_exp.device)
-                # print(self.mode)
-            else:
-                image_embedding = torch.rand(1, 64, 7, 7).to(target_exp.device)
-                target_indicator_embedding = torch.rand(1, self.num_cate, 7, 7).to(target_exp.device)
-                # print(self.mode)
-        else:
-            target_indicator = F.relu(self.detection_feature(target_info_org))
-            target_indicator = target_indicator.t()
-            target_indicator = F.relu(self.graph_detection_other_indicator_linear_1(target_indicator))
-            target_indicator = F.relu(self.graph_detection_other_indicator_linear_2(target_indicator))
-            target_indicator = torch.mm(target['appear'].t(), target_indicator).t()
-            target_indicator = torch.cat((target_indicator, target['info'], target['indicator']), dim=1)
-            target_indicator = self.graph_detection_indicator(target_indicator)
-            target_indicator_embedding = target_indicator.reshape(1, self.num_cate, 7, 7)
-            image_embedding = F.relu(self.conv1(state))
-            rand_zero = torch.where(torch.rand(1)>0.5, 1, 0).to(image_embedding.device)
-            # print(rand_zero)
+        
+        target_indicator = F.relu(self.detection_feature(target_info_org))
+        target_indicator = target_indicator.t()
+        target_indicator = F.relu(self.graph_detection_other_indicator_linear_1(target_indicator))
+        target_indicator = F.relu(self.graph_detection_other_indicator_linear_2(target_indicator))
+        target_indicator = torch.mm(target['appear'].t(), target_indicator).t()
+        target_indicator = torch.cat((target_indicator, target['info'], target['indicator']), dim=1)
+        target_indicator = self.graph_detection_indicator(target_indicator)
+        target_indicator_embedding = target_indicator.reshape(1, self.num_cate, 7, 7)
+        image_embedding = F.relu(self.conv1(state))
+        rand_zero = torch.where(torch.rand(1)>0.5, 1, 0).to(image_embedding.device)
+        
+        if self.phase == 'train':
             target_indicator_embedding = target_indicator_embedding*rand_zero
             image_embedding = image_embedding*rand_zero
+        elif self.phase == 'test':
+            if counterfact:
+                # set variable to specific value
+                if self.mode == 'zero':
+                    image_embedding = torch.zeros(1, 64, 7, 7).to(target_exp.device)
+                    target_indicator_embedding = torch.zeros(1, self.num_cate, 7, 7).to(target_exp.device)
+                    # print(self.mode)
+                elif self.mode == 'one':
+                    image_embedding = torch.ones(1, 64, 7, 7).to(target_exp.device)
+                    target_indicator_embedding = torch.ones(1, self.num_cate, 7, 7).to(target_exp.device)
+                    # print(self.mode)
+                else:
+                    image_embedding = torch.rand(1, 64, 7, 7).to(target_exp.device)
+                    target_indicator_embedding = torch.rand(1, self.num_cate, 7, 7).to(target_exp.device)
+                    # print(self.mode)
+            else:
+                pass  # not change the variable (for the fact ithem)
+        else:
+            raise NotImplementedError()
 
         x = self.dropout(image_embedding)
 

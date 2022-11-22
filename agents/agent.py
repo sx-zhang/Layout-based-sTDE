@@ -79,6 +79,9 @@ class ThorAgent:
         # depth related parameters
         self.depth = args.depth
         self.depth_maximum = args.depth_maximum
+        
+        #zsx add
+        self.model_phase = args.model_phase
 
     def sync_with_shared(self, shared_model):
         """ Sync with the shared model. """
@@ -139,7 +142,7 @@ class ThorAgent:
         else:
             self.max_length = False
 
-    def action(self, model_options, training, test_update, TDE=False):
+    def action(self, model_options, training, test_update):
         """ Train the agent. """
         if training or test_update:
             self.model.train()
@@ -149,7 +152,6 @@ class ThorAgent:
         self.episode.states.append(str(self.episode.environment.controller.state))
 
         model_input, out = self.eval_at_state(model_options)
-        # model_input, out = self.eval_at_state(model_options, TDE)
 
         # record the output of the model
         self.hidden = out.hidden
@@ -233,8 +235,8 @@ class ThorAgent:
         self.rewards.append(self.reward)
         self.actions.append(action)
         self.episode.actions_record.append(action)
-        if 'NewModel' in self.model_name:
-            kl = self.model.object_distribution.kl[-1]
+        if ('LayoutModel' in self.model_name) and self.model_phase == 'test':  # may training slow
+            kl = self.model.object_distribution.kl
             self.episode.kl_record.append(kl)
         self.episode.prev_frame = model_input.state
         self.episode.current_frame = self.state()

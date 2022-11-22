@@ -2,6 +2,7 @@ from __future__ import print_function, division
 import os
 import json
 import time
+import numpy as np
 
 from utils import command_parser
 from utils.class_finder import model_class, agent_class
@@ -53,7 +54,7 @@ def full_eval(args=None):
     best_model_on_val = None
     best_performance_on_val = 0.0
     for (f, train_ep) in tqdm(checkpoints, desc="Checkpoints."):
-        # break
+        break
 
         model = os.path.join(args.save_model_dir, f)
         args.load_model = model
@@ -62,7 +63,7 @@ def full_eval(args=None):
         main_eval(args, create_shared_model, init_agent)
 
         # check if best on val.
-        with open(args.results_json, "r") as f:
+        with open(args.results_path + '/' + args.results_json, "r") as f:
             results = json.load(f)
 
         if results["success"] > best_performance_on_val:
@@ -71,24 +72,14 @@ def full_eval(args=None):
 
         log_writer.add_scalar("val/success", results["success"], train_ep)
         log_writer.add_scalar("val/spl", results["spl"], train_ep)
-    # best models
-    # HOZ_38909040_3300000_2021_09_16_15_12_10.dat
-    # TPNHOZ_29208145_2500000_2021_09_16_15_12_33.dat
+    
     args.test_or_val = "test"
-    # args.load_model = best_model_on_val
-    # args.load_model = "./trained_models/HOZ_38909040_3300000_2021_09_16_15_12_10.dat"
-    # args.load_model = "./trained_models/TPNHOZ_29208145_2500000_2021_09_16_15_12_33.dat"
-    # args.load_model = "./trained_models/newmodel14_20591182_1600000_2022_04_14_14_10_06.dat"
-    # args.load_model = './trained_models/newmodel14_12003018_900000_2022_04_14_14_10_06.dat'
-    # args.load_model = './trained_models/new_v4_29833089_2400000_2022_04_22_13_57_25.dat'
-    # args.load_model = './trained_models/newmodelv4_reward_23312584_1700000_2022_04_26_03_34_28.dat'
-    # args.load_model = 'trained_models/graphmodel_23743487_2000000_2022_05_09_14_19_29.dat'
-    # args.load_model = 'trained_models/graphmodel_51252729_4500000_2022_05_09_14_19_29.dat'
-    # args.load_model = 'trained_models/base_36070071_3400000_2022_05_12_03_07_27.dat'
+    # args.load_model = best_model_on_val  
+    args.load_model = "./trained_models/LM_d_v2_42049784_3200000_2022_10_05_03_31_06.dat"
     
     main_eval(args, create_shared_model, init_agent)
 
-    with open(args.results_json, "r") as f:
+    with open(args.results_path + '/' + args.results_json, "r") as f:
         results = json.load(f)
 
     print(

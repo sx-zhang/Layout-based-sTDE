@@ -33,7 +33,6 @@ class NavigationAgent(ThorAgent):
         self.time_end = torch.cuda.Event(enable_timing=True)
 
         self.glove = {}
-        self.TDE = args.TDE
         self.TDE_self = args.TDE_self
     
         if 'SP' in self.model_name:
@@ -109,15 +108,17 @@ class NavigationAgent(ThorAgent):
             model_input.action_memory = toFloatTensor(model_input.action_memory, self.gpu_id)
             model_input.obs_reps = toFloatTensor(model_input.obs_reps, self.gpu_id)
 
-        if self.TDE_self and 'NewModel' in self.model_name:
+        if self.TDE_self:
             output = self.model.forward(model_input, model_options)
             output_counterfact = self.model.forward(model_input, model_options, counterfact=True)
 
-            scale = F.tanh(self.model.object_distribution.kl[-1] - self.model.TDE_threshold.item())
+            scale = self.model.object_distribution.kl - self.model.TDE_threshold
+            # print(self.model.object_distribution.kl)
             scale_min = self.model.scale_min.to(scale.device)
             scale_max = self.model.scale_max.to(scale.device)
             scale = torch.min(scale_max, scale)
-            scale = torch.max(scale_min, scale)
+            scale = torch.max(scale_min, scale)  # same as reLu when scale_min=0.0
+            # output.logit = output.logit - torch.mul(output_counterfact.logit, scale)
             output.logit = torch.mul(output.logit, 1.0+scale) - torch.mul(output_counterfact.logit, scale)
         else:
             output = self.model.forward(model_input, model_options)

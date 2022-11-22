@@ -148,7 +148,7 @@ class BasicEpisode(Episode):
             dis_R = 0
         else:
             dis_R = self.distance_reward()
-        # reward = reward + dis_R
+        reward = reward + dis_R
         # Thresholding replaced with simple look up for efficiency.
         self.last_state = self.environment.controller.state
 

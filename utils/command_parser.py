@@ -65,6 +65,13 @@ def parse_arguments():
         default='train',
         help='train, eval or debug three choices'
     )
+    
+    parser.add_argument(
+        '--model_phase',
+        type=str,
+        default='train',
+        help='train, eval or debug three choices, zsx add for model.train or eval'
+    )
 
     parser.add_argument(
         '--num-category',
@@ -409,6 +416,13 @@ def parse_arguments():
         default='metrics.json',
         help='Write the results.'
     )
+    
+    parser.add_argument(
+        '--results-path',
+        type=str,
+        default='.',
+        help='where to write the results.'
+    )
 
     parser.add_argument(
         '--visualize-file-name',
@@ -596,13 +610,6 @@ def parse_arguments():
     )
 
     parser.add_argument(
-        '--TDE',
-        type=bool,
-        default=False,
-        help='whether or not to use  causal TDE.',
-    )
-
-    parser.add_argument(
         '--TDE_self',
         type=bool,
         default=False,
@@ -613,21 +620,21 @@ def parse_arguments():
         '--TDE_threshold',
         type=float,
         default=2.0,
-        help='the rate of imitation learning loss'
+        help='the threshold in TDE operation'
     )
 
     parser.add_argument(
         '--scale_min',
         type=float,
-        default=-0.0,
-        help='the rate of imitation learning loss'
+        default=-0.001,
+        help='the min weight of counterfact'
     )
 
     parser.add_argument(
         '--scale_max',
         type=float,
-        default=0.7,
-        help='the rate of imitation learning loss'
+        default=0.8,
+        help='the max weight of counterfact'
     )
     parser.add_argument(
         '--TDE_mode',
@@ -636,6 +643,20 @@ def parse_arguments():
         help='zero, one, random',
     )
 
+    parser.add_argument(
+        '--feature_memory',
+        type=bool,
+        default=False,
+        help='True: memory save visual feature; Flase: memory save object one-hot vector',
+    )
+    
+    parser.add_argument(
+        '--record_best',
+        type=bool,
+        default=False,
+        help='whether or not to save best results',
+    )
+    
     args = parser.parse_args()
 
     return args
